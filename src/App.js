@@ -1,15 +1,42 @@
 import "./App.css";
-import {useState, useRef, useEffect} from "react";
+import React, {useCallback, useRef, useEffect, useMemo, useReducer} from "react";
 import DiaryEditor from "./DiaryEditor";
 import DiaryList from "./DiaryList";
 
-// https://jsonplaceholder.typicode.com/comments
+const reducer = (state, action) => {
+  switch (action.type) {
+    case 'INIT': {
+      return action.data
+    }
+    case 'CREATE': {
+      const created_date = new Date().getTime();
+      const newItem = {
+        ...action.data,
+        created_date,
+      }
+      return [newItem, ...state];
+    }
+    case 'DELETE':{
+      return state.filter(x=>x.id !== action.targetId);
+    }
+    case 'EDIT': {
+      return state.map(x=>x.id === action.targetId ? 
+        {...x, content: action.newContent} : x);
+    }
+    default :
+      return state;
+  }
+};
+
+export const DiaryStateContext = React.createContext(); // data 공급
+
+export const DiaryDispatchContext = React.createContext();
 
 function App() {
 
   const dataId = useRef(0);
 
-  const [data, setData] = useState([]);
+  const [data, dispatch] = useReducer(reducer, []);
 
   const getData = async () => {
     const res = await fetch('https://jsonplaceholder.typicode.com/comments').then(res=>res.json());
@@ -25,43 +52,54 @@ function App() {
       }
     })
 
-    setData(initData);
+    dispatch({type:"INIT", data:initData});
   };
 
   useEffect(()=>{
     getData();
   }, []);
 
-  const onCreate = (author, content, emotion) => {
-    const created_date = new Date().getTime();
-    const newItem = {
-      author,
-      content,
-      emotion,
-      created_date,
-      id : dataId.current
-    }
+  const onCreate = useCallback((author, content, emotion) => {
+    dispatch({type:'CREATE', data:{author, content, emotion, id:dataId.current}})
     dataId.current += 1;
-    setData([newItem, ...data]);
-  }
+  }, []);
 
-  const onDelete = (targetId) => {
-    console.log(`${targetId}가 삭제되었습니다.`);
-    const newDiaryList = data.filter(x=>x.id !== targetId);
-    setData(newDiaryList);
-  }
+  const onDelete = useCallback((targetId) => {
+    dispatch({type:"DELETE", targetId});
+  }, []);
 
-  const onEdit = (targetId, newContent) => {
-    setData(
-      data.map(x=>x.id === targetId ? {...x, content:newContent} : x)
-    );
-  }
+  const onEdit = useCallback((targetId, newContent) => {
+    dispatch({type:'EDIT', targetId, newContent});
+  },[]);
+
+  const memoizedDispatches = useMemo(()=>{
+    return {onCreate, onDelete, onEdit}
+  }, []);
+
+  // useMemo는 함수가 아니라 값을 반환한다.
+  const getDiaryAnalysis = useMemo(() => {
+
+    const goodCount = data.filter(x=>x.emotion >=3).length;
+    const badCount = data.length - goodCount;
+    const goodRatio = (goodCount/data.length) * 100;
+    return {goodCount, badCount, goodRatio};
+  }, [data.length]);
+
+  const {goodCount, badCount, goodRatio} = getDiaryAnalysis;
 
   return (
-    <div className="App">
-      <DiaryEditor onCreate={onCreate}/>
-      <DiaryList diaryList={data} onDelete={onDelete} onEdit={onEdit}/>
-    </div>
+    <DiaryStateContext.Provider value={data}>
+      <DiaryDispatchContext.Provider value={memoizedDispatches}>
+        <div className="App">
+          <DiaryEditor/>
+          <div>전체 일기 : {data.length}</div>
+          <div>기분 좋은 일기 개수 : {goodCount}</div>
+          <div>기분 나쁜 일기 개수 : {badCount}</div>
+          <div>기분 좋은 일기 비율 : {goodRatio}</div>
+          <DiaryList/>
+        </div>
+      </DiaryDispatchContext.Provider>
+    </DiaryStateContext.Provider>
   );
 }
 
